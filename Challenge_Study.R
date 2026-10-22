@@ -1,4 +1,14 @@
-#Challenge study Analysis for CEA project
+#This is the code that was used for challenge study analysis as a part of the
+#manuscript ": Listeria monocytogenes, Salmonella enterica, 
+#and enterohemorrhagic Escherichia coli show significant die-off in both conventional 
+#and organic controlled environment agriculture nutrient solution over a five-day period."
+
+## install if needed (do this exactly once):
+## install.packages("usethis")
+
+library(usethis)
+use_git_config(user.name = "tamardigrade", user.email = "tmwalsky@gmail.com")
+
 #Load  packages
 library("tidyverse")
 library(lmerTest)
@@ -7,53 +17,89 @@ library(nlsMicrobio)
 library(grid)
 library(gridExtra)
 library(extrafont)
+library(broom.mixed)
 font_import() # Make sure to type 'Y' when prompted
 loadfonts(device = "win", quiet = TRUE)
 
 #save the R environment
-save.image(file='C:/Users/tmwal/OneDrive/Desktop/Challengestudydata04242026.RData')
+#save.image(file='C:/Users/tmwal/OneDrive/Desktop/Challengestudydata04242026.RData')
 
 #See the following link for help with interpreting linear models, regression and anova
 #https://cscu.cornell.edu/workshop/interpreting-linear-models-regression-and-anova/
 
 #load saved R environment
-load("C:/Users/tmwal/OneDrive/Desktop/Challengestudydata04242026.RData")
+#load("C:/Users/tmwal/OneDrive/Desktop/Challengestudydata04242026.RData")
+load("/local1/workdir1/tw488/CEA_RData_RScript/Challengestudydata04242026.RData")
+save.image(file='/local1/workdir1/tw488/CEA_RData_RScript/Challengestudydata04242026.RData')
+
 
 #import Total Plate Count (TPC) files 
 TPC<-read.csv('/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Induvidual_Water_Samples_for_manuscipt_07022025.csv')
 TPC<-TPC%>%na.omit()
 TPC$Pond_Type_Number <- paste(TPC$Pond_Type,TPC$Pond_Number)
 
-#calculate TPC average values
+#calculate TPC average values (using replicates)
 TPC1 <- TPC %>% group_by(Sample_Name) %>% mutate(Average_Conc=mean(Concentration))
 TPC1 <- TPC1 %>% group_by(Sample_Name) %>% mutate(Log_Average_Conc=log10(Average_Conc))%>%ungroup
 
-#Use lmer to make mixed model to test impact of pond type on log count data using unavgd replicates
+#Use lmer to make mixed model to test impact of pond type on log count data using unaveraged replicates
   # Pond Number:fixed effect
   # Location:fixed effect
 TPC2<-TPC1%>%distinct(Pond_Type_Number,Pond_Type,Pond_Number, Log_Average_Conc, .keep_all = TRUE)
 TPC2$Pond_Type_Number <- as.factor(TPC2$Pond_Type_Number)
 
-TPC_lmer <- lme4::lmer(log10(Average_Conc) ~ Pond_Type+ Location+(1|Pond_Type_Number), TPC2)
+
+#TPC_lmer <- lme4::lmer(log10(Average_Conc) ~ Pond_Type+ Location+(1|Pond_Type_Number), TPC2)
+TPC_lmer <- lm(log10(Average_Conc) ~ Pond_Type+ Location, TPC2)
+
 summary(TPC_lmer)
-#for pond type
-emmeans(TPC_lmer, pairwise ~ Pond_Type, type = "response")
-#To calculate % change on your own, Subtract 1 from the factor value (the ratio column in the 
-#emmeans output), then multiply by 100
 
-#Conventional / Organic
-(0.354-1)*100 #-64.6% change; decr by ~65%
+TPC_lmer_df <- tidy(TPC_lmer, conf.int = TRUE)
+write.csv(TPC_lmer_df, "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/APC_lm_emmeans/TPC_lmer_df.csv", row.names = FALSE)
 
 
-#for location
-emmeans(TPC_lmer, pairwise ~  Location, type = "response")
+#Figure out effect size for pond type
+emmeans_TPC_lmer<-emmeans(TPC_lmer, pairwise ~ Pond_Type, type = "response")
+emmeans_TPC_lmer
 
-#location H / M
-(1.28-1)*100 #28% change; incr by 28%
-#location H / S
-(1.39-1)*100 #39% change; incr by ~39%
-#location M / S
-(1.08-1)*100 #8% change; incr by ~8%
+#https://cran.r-project.org/web/packages/emmeans/vignettes/transformations.html
+#Alternative scale section for percent differences instead of ratios
+
+pct.diff.tran10 <- list(
+  linkfun = function(mu) log10(mu/100 + 1),
+  #these next 3 lines are changed to reflect log10, not natural log
+  linkinv = function(eta) 100 * (10^(eta) - 1),
+  mu.eta  = function(eta) 100 * log(10) * 10^(eta),
+  name    = "log10(pct.diff)"
+)
+
+emmeans_TPC_lmer_df <- as.data.frame(update(pairs(emmeans_TPC_lmer, type = "response"), 
+       tran = pct.diff.tran10, inv.lbl = "pct.diff", adjust = "none",
+       infer = c(TRUE, TRUE)))
+emmeans_TPC_lmer_df
+
+#Figure out effect size for location
+emmeans_TPC_lmer_Loc<-emmeans(TPC_lmer, pairwise ~ Location, type = "response")
+emmeans_TPC_lmer_Loc
+
+
+pct.diff.tran10 <- list(
+  linkfun = function(mu) log10(mu/100 + 1),
+  #these next 3 lines are changed to reflect log10, not natural log
+  linkinv = function(eta) 100 * (10^(eta) - 1),
+  mu.eta  = function(eta) 100 * log(10) * 10^(eta),
+  name    = "log10(pct.diff)"
+)
+
+emmeans_TPC_lmer_Loc_df <- as.data.frame(update(pairs(emmeans_TPC_lmer_Loc, type = "response"), 
+       tran = pct.diff.tran10, inv.lbl = "pct.diff", adjust = "none",
+       infer = c(TRUE, TRUE)))
+emmeans_TPC_lmer_Loc_df
+
+#Save APC emmeans details to 
+write.csv(emmeans_TPC_lmer_Loc_df, "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/APC_lm_emmeans/emmeans_TPC_lmer_Loc_df.csv", row.names = FALSE)
+write.csv(emmeans_TPC_lmer_df, "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/APC_lm_emmeans/emmeans_TPC_lmer_df.csv", row.names = FALSE)
+
 
 # Simple Linear Model
 TPC_final <- lm(Log_Average_Conc ~ Pond_Type + Location, data = TPC2)
@@ -63,56 +109,22 @@ plot(TPC_final)
 anova(TPC_final)
 summary(TPC_final)
 
+
 #Calculate the average log concentration of conventional vs organic samples
-TPC3 <- TPC2 %>% group_by(Pond_Type) %>% 
-  mutate(Average_Conc_byPondType=mean(Average_Conc))%>%
-  mutate(Log_Average_Conc_byPondType=log10(Average_Conc_byPondType))%>%
+#TPC3 <- TPC2 %>% group_by(Pond_Type) %>% 
+ # mutate(Average_Conc_byPondType=mean(Average_Conc))%>%
+  #mutate(Log_Average_Conc_byPondType=log10(Average_Conc_byPondType))%>%
+  #mutate(log_SD_Average_Conc_byPond=sd(Log_Average_Conc)) %>%ungroup
+TPC3v2 <- TPC2 %>% group_by(Pond_Type) %>% 
+ # mutate(Log_Conc=log10(Average_Conc))%>%
+  mutate(Log_Average_Conc_byPondType=mean(Log_Average_Conc))%>%
   mutate(log_SD_Average_Conc_byPond=sd(Log_Average_Conc)) %>%ungroup
 
-TPC_logavgconcbypondtype<-TPC3%>%distinct(Pond_Type, Log_Average_Conc_byPondType, .keep_all = TRUE)
+#TPC_logavgconcbypondtype<-TPC3%>%distinct(Pond_Type, Log_Average_Conc_byPondType, .keep_all = TRUE)
+TPC_logavgconcbypondtypev2<-TPC3v2%>%distinct(Pond_Type, Log_Average_Conc_byPondType,log_SD_Average_Conc_byPond, .keep_all = TRUE)
 
+write.csv(TPC_logavgconcbypondtypev2, "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/PLate_Count_Values_for_Paper/TPC_logavgconcbypondtypev2.csv", row.names = FALSE)
 
-#plot
-
-apccolor <- rep(c( "#D55E00", 
-                     "#0072B2"))
-
-
-#plot
-apcplot <- ggplot(TPC3, aes(x = Pond_Type, y = Log_Average_Conc, 
-                              color = Pond_Type)) + 
-  geom_boxplot(size = 5,width = 0.5) + 
-  geom_point(position=position_dodge(width=0.75),color="black", size=10)+
-  labs(title = expression( ~ italic("Aerobic Plate Count")),x = "Pond Type", 
-       y = expression(Concentration~ (log [10] ~CFU/mL)))+
-  theme_bw() +
-  scale_color_manual(values = apccolor) +
-  scale_shape_manual(values = c(16, 17, 15, 18)) + 
-  guides(color = guide_legend(title = "Pond Type"))+
-  theme(text = element_text(family = "Times New Roman"),
-        strip.text = element_text(size = 40, face = "bold"),
-        panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-       legend.title = element_text(size = 50), 
-        legend.text = element_text(size = 50),
-        axis.text.x = element_text(angle = 0,  size = 50),
-        axis.text.y = element_text(angle = 0, vjust = 0.3, hjust = 0.5, size = 50, margin = margin(0,0,0,20)),
-        axis.title.y = element_text(size = 50),
-        axis.title.x = element_text(size = 50),
-        plot.title = element_text(size = 55, face = "italic", hjust = 0.5))
-
-apcplot
-
-ggsave(
-  filename = "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/apcplot.tiff", 
-  plot = last_plot(),       
-  device = "tiff",          
-  units = "in", 
-  width = 25, 
-  height = 15, 
-  dpi = 700, 
-  compression = "lzw",
-  type = "cairo")
 
 
 #INOCULATION DATA
@@ -143,17 +155,42 @@ LmonoNC <- df %>% filter(Bacteria=="LMONO")%>% filter(Aliquot=="NC")
 #Take out Lmono NC, calc average values
 Lmono_A_C <- df %>% filter(Bacteria=="LMONO")%>% filter(Aliquot!="NC")
 
-#Replace -inf in Log_Avg_Conc column with 1.3, which is the Limit of Detection, 
-#and replace 0 in Avg_Conc column with 10^1.3
-#Lmono_A_C_1$Log_Average_Conc<- gsub("-Inf", "1.3",Lmono_A_C_1$Log_Average_Conc)
-x=10^(1.3)
-Lmono_A_C$Final_Concentration[Lmono_A_C$Final_Concentration == "0"] <- x
-Lmono_A_C$Final_Concentration<- as.numeric(Lmono_A_C$Final_Concentration)
+
+#find limits of detection (LOD) for undiluted and 0.1 dilution plates
+#detection limit (CFU/mL) = (# colonies ÷(the amount plated on the agar plate)) × dilution factor 
+LOD_CFU_mL_undiluted = (1/ 0.05)*1 
+LOD_CFU_mL_0.1 = (1/ 0.05)*10
+log10(LOD_CFU_mL_undiluted)
+log10(LOD_CFU_mL_0.1)
+
+#Calculate LOD times * 0.25 for imputation
+Impute_LOD_CFU_mL_0.1=LOD_CFU_mL_0.1*0.25
+Impute_LOD_CFU_mL_undiluted=LOD_CFU_mL_undiluted*0.25
+log10(Impute_LOD_CFU_mL_0.1)
+log10(Impute_LOD_CFU_mL_undiluted)
+
+
+#Replace 0 in Avg_Conc column of Day 5 with LOD_CFU_mL_undiluted (the Limit of detection for undiluted plates)
+#Replace 0 in Avg_Conc column of Day 5 with LOD_CFU_mL_0.1 (the Limit of detection for 0.1 dilution plates)
+
+Lmono_A_C <- Lmono_A_C %>%
+  mutate(
+    Final_Concentration = as.numeric(Final_Concentration),
+    Below_LOD = Final_Concentration == 0,          
+    LOD = case_when(
+      Day == "DAY2" ~ Impute_LOD_CFU_mL_0.1,
+      Day == "DAY5" ~ Impute_LOD_CFU_mL_undiluted,
+      TRUE          ~ NA_real_                     #no nondetects on DAY0/DAY1
+    ),
+    Final_Concentration = ifelse(Below_LOD, LOD, Final_Concentration)
+  )
+
+#Check: this should return nothing
+Lmono_A_C %>% filter(Below_LOD & is.na(LOD))
 
 #calculate average values by replicate
 Lmono_A_C_byREP <- Lmono_A_C %>% 
   group_by(Day,Pond_Type_Number, Aliquot, Dilution) %>% 
-  mutate(Average_Count=mean(Counted_Colonies))%>% 
   mutate(Average_Conc=mean(Final_Concentration)) %>% 
   mutate(Log_Average_Conc=log10(Average_Conc))%>%
   ungroup
@@ -184,7 +221,7 @@ r5 <- ggplot(Lmono_A_C_1, aes(x = Day_numeric, y = Log_Average_Conc,
                                          shape = factor(Pond_Type_Number), 
                                          color = factor(Pond_Type_Number))) + 
   # Map both color and shape to the same factor to merge the legend
-  geom_point(size = 18, alpha = 0.9) + 
+  geom_point(size = 12, alpha = 0.9) + 
   labs(title = expression( ~ italic("Listeria monocytogenes")),
        x = "Day", 
        y = y.expression) +  
@@ -211,7 +248,7 @@ r5 <- ggplot(Lmono_A_C_1, aes(x = Day_numeric, y = Log_Average_Conc,
 r5
 
 ggsave(
-  filename = "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Lmonolin_contxaxis_poster3.tiff", 
+  filename = "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Lmonolin_contxaxis_09292026.tiff", 
   plot = last_plot(),       
   device = "tiff",          
   units = "in", 
@@ -236,6 +273,17 @@ confint(Lmonomodel)
 Lmonomodelparameters_Lm <- summary(Lmonomodel)$coefficients
 print(Lmonomodelparameters_Lm)
 
+#Extract the slope (coefficient of the 'time' variable)
+slope <- coef(Lmonomodel)["Day_numeric"]
+
+# Calculate the D-value (-1 / slope)
+d_value = -1 / slope
+d_value
+
+# Calculate the confidence intervals
+ci_slope <- confint(Lmonomodel)["Day_numeric", ]
+d_ci <- rev(-1 / ci_slope)    
+d_ci
 
 # To see only the Residuals vs Fitted plot:
 plot(Lmonomodel, which = 1)
@@ -266,29 +314,33 @@ abline(h = 0, lty = 2, col = "red")
 # see this vignette for a full explanation: https://cran.r-project.org/web/packages/emmeans/vignettes/transformations.html
 
 class(Lmono_A_C_1)
-Lmono_lmer <- lmerTest::lmer(log10(Average_Conc) ~ Day * Pond_Type+(1|Pond_Type_Number), Lmono_A_C_1)
+Lmono_lmer <- lmerTest::lmer((Log_Average_Conc) ~ Day * Pond_Type+(1|Pond_Type_Number), Lmono_A_C_1)
 summary(Lmono_lmer)
 anova(Lmono_lmer)
 
 #add ',type="response" to this emmeans code so it recognizes
 #the values are log10 transformed and the responses emmeans provides are exponentiated
 #so you dont have to exponentiate by hand
-#But you have to calculate % change on your own
-emmeans(Lmono_lmer, consec ~ Day,type="response")
+Lmono_lmer_emmeans <- emmeans(Lmono_lmer, consec ~ Day,  type = "response", lmer.df = "satterthwaite")
 
-#To calculate % change on your own, Subtract 1 from the factor value (the ratio column in the 
-#emmeans output), then multiply by 100
-#Day1/Day0
-(0.6839-1)*100 #-31.61% change; decr by ~32%
-#Day2/Day1
-(0.0405-1)*100 #-95.95% change; decr by ~96%
-#Day2/Day1
-(0.0251-1)*100 #-97.49% change; decr by ~97%
+
+#To calculate % change 
+Lmono_lmer_emmeans_df <- as.data.frame(update(
+  contrast(Lmono_lmer_emmeans, method = "consec"),   # DAY1/DAY0, DAY2/DAY1, DAY5/DAY2
+  tran = pct.diff.tran10, inv.lbl = "pct.diff",
+  adjust = "none",                                   # or remove to use the mvt default
+  infer = c(TRUE, TRUE)))
+
+Lmono_lmer_emmeans_df
+
+#Save Lmono_lmer_emmeans details to 
+write.csv(Lmono_lmer_emmeans_df, "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Pathogen_lm_emmeans/Lmono_lmer_emmeans.csv", row.names = FALSE)
+
 
 #Average the aliquots together to find overall average values by organic/ conventional
 Lmono_A_C_bypond <- Lmono_A_C_1%>%
   group_by(Day,Pond_Type) %>% 
-  mutate(Average_Log_Conc_byPond=log10(mean(Average_Conc)))%>%
+  mutate(Average_Log_Conc_byPond=mean(Log_Average_Conc))%>%
   mutate(log_SD_Average_Conc_byPond=sd(Log_Average_Conc)) %>%
   mutate(log_SER_Average_Conc_byPond=(sd(Log_Average_Conc))/(sqrt(3))) %>%
   ungroup
@@ -311,7 +363,6 @@ Salm_A_C <- df %>% filter(Bacteria=="SALM")%>% filter(Aliquot!="NC")
 #calculate average values by replicate
 Salm_A_C_byREP <- Salm_A_C %>% 
   group_by(Day,Pond_Type_Number, Aliquot, Dilution) %>% 
-  mutate(Average_Count=mean(Counted_Colonies))%>% 
   mutate(Average_Conc=mean(Final_Concentration)) %>% 
   mutate(Log_Average_Conc=log10(Average_Conc))%>%
   ungroup
@@ -339,7 +390,7 @@ rsalm <- ggplot(Salm_A_C_1, aes(x = Day_numeric, y = Log_Average_Conc,
                                          shape = factor(Pond_Type_Number), 
                                          color = factor(Pond_Type_Number))) + 
   # Map both color and shape to the same factor to merge the legend
-  geom_point(size = 18, alpha = 0.9) + 
+  geom_point(size = 12, alpha = 0.9) + 
   labs(title = expression(~italic("Salmonella enterica")),
        x = "Day", 
        y = y.expression) +  
@@ -366,7 +417,7 @@ rsalm <- ggplot(Salm_A_C_1, aes(x = Day_numeric, y = Log_Average_Conc,
 rsalm
 
 ggsave(
-  filename = "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Salml_contxaxis_poster.tiff", 
+  filename = "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Salm_10122026.tiff", 
   plot = last_plot(),     
   device = "tiff",          
   units = "in", 
@@ -440,33 +491,28 @@ anova(Salm_lmer)
 #add ',type="response" to this emmeans code so it recognizes
 #the values are log10 transformed and the responses emmeans provides are exponentiated
 #so you dont have to exponentiate by hand
-#But you have to calculate % change on your own
 
-emmeans(Salm_lmer, consec ~ Day| Pond_Type,type="response") 
-#To calculate % change on your own, Subtract 1 from the factor value (the ratio column in the 
-#emmeans output), then multiply by 100
-
-#Conventional Day1/Day0
-(0.5166-1)*100 #-48.34 change; decr by ~48%
-#Conventional Day2/Day1
-(0.3970-1)*100 #-60.3% change; decr by ~60%
-#Conventional Day5/Day2
-(0.0369-1)*100 #-96.31% change; decr by ~96%
+Salm_lmer_emmeans <- emmeans(Salm_lmer, consec ~ Day| Pond_Type,type="response", lmer.df = "satterthwaite") 
 
 
-#Organic Day1/Day0
-(1.0134-1)*100 #1.34% change; incr by ~1%
-#Organic Day2/Day1
-(0.6301-1)*100 #-36.99% change; decr by ~37%
-#Organic Day5/Day2
-(0.0649-1)*100 #-93.51% change; decr by ~93%
+#To calculate % change 
 
+Salm_lmer_emmeans_df <- as.data.frame(update(
+  contrast(Salm_lmer_emmeans, method = "consec"),   # DAY1/DAY0, DAY2/DAY1, DAY5/DAY2
+  tran = pct.diff.tran10, inv.lbl = "pct.diff",
+  adjust = "none",                                   # or remove to use the mvt default
+  infer = c(TRUE, TRUE)))
+
+Salm_lmer_emmeans_df
+
+#Save Salm_lmer_emmeans details to 
+write.csv(Salm_lmer_emmeans_df, "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Pathogen_lm_emmeans/Salm_lmer_emmeans.csv", row.names = FALSE)
 
 #calculate averages
 
 Salm_A_C_bypond <- Salm_A_C_1%>%
   group_by(Day,Pond_Type) %>% 
-  mutate(Average_Log_Conc_byPond=log10(mean(Average_Conc)))%>%
+  mutate(Average_Log_Conc_byPond=(mean(Log_Average_Conc)))%>%
   mutate(log_SD_Average_Conc_byPond=sd(Log_Average_Conc)) %>%
   mutate(log_SER_Average_Conc_byPond=(sd(Log_Average_Conc))/(sqrt(3))) %>%
   ungroup
@@ -490,7 +536,9 @@ Ecoli_select$Sample_ID_Aliquot<-paste(Ecoli_select$Day,Ecoli_select$Pond_Type_Nu
 Ecoli_select$Sample_ID<-paste(Ecoli_select$Day,Ecoli_select$Pond_Type_Number,sep = '_')
 
 #calculate average concentration and log average concentration
-Ecoli_select1 <- Ecoli_select %>% group_by(Day,Pond_Type_Number,Aliquot,Dilution,Date) %>% mutate(Average_Conc=mean(Final_Conc))%>% mutate(Log_Average_Conc=log10(Average_Conc))%>% ungroup
+Ecoli_select1 <- Ecoli_select %>% group_by(Day,Pond_Type_Number,Aliquot,Dilution,Date) %>% 
+  mutate(Average_Conc=mean(Final_Conc))%>% 
+  mutate(Log_Average_Conc=log10(Average_Conc))%>% ungroup
 
 #get rid of duplicates 
 Ecoli_select1<-Ecoli_select1 %>% distinct(Day,Pond_Type_Number,Aliquot,Dilution,Date, .keep_all = TRUE)
@@ -510,23 +558,22 @@ anova(Ecoli_lmer)
 #add ',type="response" to this emmeans code so it recognizes
 #the values are log10 transformed and the responses emmeans provides are exponentiated
 #so you dont have to exponentiate by hand
-#But you have to calculate % change on your own
 
-emmeans(Ecoli_lmer, consec ~ Day| Pond_Type,type="response") 
-#Conventional Day1/Day0
-(0.631-1)*100 #-36.9 change; decr by ~37%
-#Conventional Day2/Day1
-(0.508-1)*100 #-49.2% change; decr by ~49%
-#Conventional Day5/Day2
-(0.153-1)*100 #-84.7% change; decr by ~85%
+Ecoli_lmer_emmeans <- emmeans(Ecoli_lmer, consec ~ Day| Pond_Type,  type = "response", lmer.df = "satterthwaite")
+
+#To calculate % change 
+Ecoli_lmer_emmeans_df <- as.data.frame(update(
+  contrast(Ecoli_lmer_emmeans, method = "consec"),   # DAY1/DAY0, DAY2/DAY1, DAY5/DAY2
+  tran = pct.diff.tran10, inv.lbl = "pct.diff",
+  adjust = "none",                                   # or remove to use the mvt default
+  infer = c(TRUE, TRUE)))
+
+Ecoli_lmer_emmeans_df
+
+#Save Lmono_lmer_emmeans details to 
+write.csv(Ecoli_lmer_emmeans_df, "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Pathogen_lm_emmeans/Ecoli_lmer_emmeans.csv", row.names = FALSE)
 
 
-#Organic Day1/Day0
-(0.870-1)*100 #-13% change; decr by ~13%
-#Organic Day2/Day1
-(0.843-1)*100 #-15.7% change; decr by ~16%
-#Organic Day5/Day2
-( 0.149-1)*100 #-85.1% change; decr by ~85%
 #remove NC samples, adjust the Sample ID so it has NC attached and then merge with Ecoli_select1_noNC df
 Ecoli_select1_NC <- Ecoli_select1%>%
   filter(Aliquot=="NC")
@@ -556,7 +603,7 @@ LOD.expression <- expression("The Limit of Detection is 1.3"~log [10] ~CFU/mL)
 recoli <- ggplot(Ecoli_select1_noNC, aes(x = Day_numeric, y = Log_Average_Conc, 
                                          shape = factor(Pond_Type_Number), 
                                          color = factor(Pond_Type_Number))) + 
-  geom_point(size = 18, alpha = 0.9) + 
+  geom_point(size = 12, alpha = 0.9) + 
   labs(title = expression("Enterohemorrhagic" ~ italic("E. coli")),
        x = "Day", 
        y = y.expression) +  
@@ -584,7 +631,7 @@ recoli
 
 
 ggsave(
-  filename = "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Ecoli_contxaxis_poster.tiff", 
+  filename = "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/Ecoli_10122026.tiff", 
   plot = last_plot(),       
   device = "tiff",          
   units = "in", 
@@ -656,7 +703,7 @@ abline(h = 0, lty = 2, col = "red")
 Ecoli_bypond <- Ecoli_select1 %>% 
   filter(Aliquot!="NC")%>% 
   group_by(Day,Pond_Type) %>% 
-  mutate(Average_Log_Conc_byPond=log10(mean(Average_Conc)))%>%
+  mutate(Average_Log_Conc_byPond=(mean(Log_Average_Conc)))%>%
   mutate(log_SD_Average_Conc_byPond=sd(Log_Average_Conc)) %>%
   ungroup
 
@@ -678,4 +725,4 @@ Lmono_A_C_bypond_fortable
 stacked_df <- bind_rows(Lmono_A_C_bypond_fortable, Salm_A_C_bypond_fortable )
 
 stacked_df <- bind_rows(stacked_df, Ecoli_bypond_fortable )
-write.csv(stacked_df, "C:/Users/tmwal/OneDrive/Desktop/stacked_df_TableS2.csv", row.names = TRUE)
+write.csv(stacked_df, "/local1/workdir1/tw488/CEA_RData_RScript/Challenge_study/PLate_Count_Values_for_Paper/All_Pathogen_Log_Conc_by_Day.csv", row.names = FALSE)
